@@ -966,7 +966,56 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.3 任务详情——文件列表查询
+### 7.3 独立文件查询（跨任务）
+
+不依赖任务维度，直接查询所有识别文件记录，支持按供应商筛选，查看某供应商的所有OCR识别历史。
+
+```
+GET /api/ocr/files?page=1&size=20&supplierName=&supplierMatched=&status=
+    &docTypeCode=&fileName=&startDate=&endDate=
+Header: Authorization: Bearer {SSO Token}
+
+参数说明：
+  supplierName     String    供应商名称（模糊查询）
+  supplierMatched  Boolean   供应商是否匹配成功（可选）
+  status           String    文件状态（可选）
+  docTypeCode      String    单据类型编码（可选）
+  fileName         String    文件名（模糊查询，可选）
+  startDate        String    开始时间（可选）
+  endDate          String    结束时间（可选）
+
+响应：
+{
+  "code": 200,
+  "data": {
+    "total": 256,
+    "pages": 13,
+    "list": [
+      {
+        "fileId": "F001",
+        "taskNo": "OCR20260101001",
+        "fileName": "发票_001.pdf",
+        "docTypeName": "采购进货单",
+        "status": "SUCCESS",
+        "overallConfidence": 98.5,
+        "supplierName": "深圳市XX科技有限公司",
+        "supplierMatched": true,
+        "headerSummary": {
+          "order_no": "PO20260101001",
+          "order_date": "2026-01-01",
+          "total_amount": "125000.00"
+        },
+        "bodyRowCount": 5,
+        "callbackStatus": "SUCCESS",
+        "processTime": 2300,
+        "createdAt": "2026-01-01 10:30:05"
+      }
+    ]
+  }
+}
+```
+
+### 7.4 任务详情——文件列表查询
 
 ```
 GET /api/ocr/task/{taskId}/files?page=1&size=20&status=
@@ -1021,7 +1070,7 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.4 文件识别结果详情（含原始JSON）
+### 7.5 文件识别结果详情（含原始JSON）
 
 ```
 GET /api/ocr/file/{fileId}
@@ -1052,7 +1101,7 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.5 查看OCR原始JSON
+### 7.6 查看OCR原始JSON
 
 ```
 GET /api/ocr/file/{fileId}/raw-json
@@ -1072,7 +1121,7 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.6 获取待审核文件详情
+### 7.7 获取待审核文件详情
 
 ```
 GET /api/ocr/file/{fileId}/review
@@ -1112,7 +1161,7 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.7 提交审核修改
+### 7.8 提交审核修改
 
 ```
 POST /api/ocr/file/{fileId}/confirm
@@ -1147,7 +1196,7 @@ Header: Authorization: Bearer {SSO Token}
 }
 ```
 
-### 7.8 对象类型管理
+### 7.9 对象类型管理
 
 ```
 POST   /api/ocr/config/doc-type                  创建单据类型
@@ -1165,7 +1214,7 @@ GET    /api/ocr/config/field/{id}/aliases         查询字段别名
 DELETE /api/ocr/config/field-alias/{id}           删除字段别名
 ```
 
-### 7.9 租户阈值管理
+### 7.10 租户阈值管理
 
 ```
 GET    /api/ocr/config/threshold                          查询当前租户所有阈值
@@ -1178,7 +1227,7 @@ DELETE /api/ocr/config/threshold/{docTypeId}               恢复默认阈值
 }
 ```
 
-### 7.10 租户存储空间管理
+### 7.11 租户存储空间管理
 
 ```
 GET    /api/ocr/storage/info                     查看存储空间使用情况
@@ -1192,14 +1241,14 @@ POST   /api/ocr/storage/purchase                 购买存储空间
 }
 ```
 
-### 7.11 供应商同步接口
+### 7.12 供应商同步接口
 
 ```
 POST   /api/ocr/supplier/sync                   批量同步供应商
 GET    /api/ocr/suppliers?keyword=               查询供应商列表（审核时供选择）
 ```
 
-### 7.12 回调外部系统接口规范
+### 7.13 回调外部系统接口规范
 
 由于外部系统目前还没有接口规范，由本系统定义回调报文格式：
 
@@ -1289,7 +1338,8 @@ Content-Type: application/json
   ├── 库存管理
   ├── OCR智能识别          ← 新增模块
   │   ├── 文件识别           ← 上传+识别
-  │   ├── 任务查询           ← 任务列表+文件列表
+  │   ├── 任务查询           ← 任务列表 → 点击进入任务内文件列表
+  │   ├── 识别记录           ← 独立文件查询（跨任务，可按供应商查询）
   │   ├── 人工审核           ← 待审核列表+审核操作
   │   └── 系统配置           ← 对象/字段/阈值配置
   └── 系统管理
@@ -1354,7 +1404,53 @@ Content-Type: application/json
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 页面3: 文件列表页（点击任务进入）
+#### 页面3: 识别记录页（独立文件查询，跨任务）
+
+不依赖任务维度，直接查询所有识别文件。核心场景：输入供应商名称，查看该供应商所有OCR识别历史。
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  OCR智能识别 > 识别记录                                                │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  查询条件:                                                            │
+│  供应商:  [__________]  单据类型: [全部 ▼]  状态: [全部 ▼]            │
+│  文件名:  [__________]  供应商匹配: [全部 ▼]                          │
+│  创建时间: [2026-01-01] ~ [2026-01-31]       [查询] [重置]            │
+│                                                                      │
+│  ┌──────────────────────────────────────────────────────────────────┐│
+│  │ 文件名        所属任务         供应商          单据类型           ││
+│  │               (匹配状态)       订单号          金额   置信度     ││
+│  │                                                      状态 操作  ││
+│  ├──────────────────────────────────────────────────────────────────┤│
+│  │ 发票_001.pdf  OCR20260101001  XX科技(已匹配)  采购进货单         ││
+│  │                               PO20260101001   12.5万  98.5%     ││
+│  │                                                      已完成     ││
+│  │                                              [查看详情] [JSON]  ││
+│  │                                                                  ││
+│  │ 发票_008.jpg  OCR20260102003  XX科技(已匹配)  进项发票            ││
+│  │                               INV20260101005  6.8万   96.2%     ││
+│  │                                                      已完成     ││
+│  │                                              [查看详情] [JSON]  ││
+│  │                                                                  ││
+│  │ 发票_012.png  OCR20260103001  XX科技(已匹配)  询价清单            ││
+│  │                               IQ20260103002   --      82.3%     ││
+│  │                                                      待审核     ││
+│  │                                              [审核] [JSON]      ││
+│  └──────────────────────────────────────────────────────────────────┘│
+│                                                                      │
+│  共 256 条  < 1 2 3 4 5 ... 13 >                                    │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+
+使用场景:
+  · 查看某供应商历史所有识别记录 → 输入供应商名称查询
+  · 查看所有识别失败的文件 → 状态选择"失败"
+  · 查看所有供应商未匹配的文件 → 供应商匹配选择"未匹配"
+  · 跨任务搜索某个文件 → 输入文件名查询
+```
+
+#### 页面4: 文件列表页（点击任务进入）
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -1392,7 +1488,7 @@ Content-Type: application/json
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-#### 页面4: OCR原始JSON查看弹窗
+#### 页面5: OCR原始JSON查看弹窗
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1420,7 +1516,7 @@ Content-Type: application/json
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-#### 页面5: 人工审核页（核心页面）
+#### 页面6: 人工审核页（核心页面）
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1470,7 +1566,7 @@ Content-Type: application/json
   · 支持 [上一个][下一个] 切换待审核文件
 ```
 
-#### 页面6: 系统配置页
+#### 页面7: 系统配置页
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -1779,7 +1875,79 @@ public class OcrAuthInterceptor implements HandlerInterceptor {
 
 ---
 
-## 13. 项目模块结构
+## 13. 测试DEMO宿主系统
+
+### 13.1 设计目标
+
+提供一个完整可运行的测试DEMO，作为宿主系统直接启动，内置模拟SSO鉴权，使开发和测试过程无需依赖真实宿主系统。
+
+### 13.2 DEMO功能
+
+```
+ocr-demo（测试宿主系统）:
+  · 内置模拟SSO登录（用户名/密码登录，返回JWT Token）
+  · 内置多租户模拟（预置2个测试租户）
+  · 内置供应商测试数据
+  · 引入ocr-starter依赖，自动启用OCR模块
+  · 提供回调接收接口（模拟外部系统接收回调数据）
+  · H2/MySQL双模式（开发用H2内存库，集成测试用MySQL）
+  · 前端DEMO页面（登录页 + 宿主系统框架页 + OCR模块嵌入）
+```
+
+### 13.3 模拟SSO鉴权
+
+```
+登录接口:
+  POST /api/auth/login
+  { "username": "admin", "password": "123456" }
+  →
+  { "code": 200, "data": { "token": "eyJhbGc...", "tenantId": "T001", "userId": "U001", "userName": "管理员" } }
+
+预置测试账户:
+  ┌──────────┬──────────┬──────────┬──────────┐
+  │ 用户名    │ 密码      │ 租户ID   │ 角色      │
+  ├──────────┼──────────┼──────────┼──────────┤
+  │ admin    │ 123456   │ T001    │ 管理员    │
+  │ user1    │ 123456   │ T001    │ 普通用户  │
+  │ admin2   │ 123456   │ T002    │ 管理员    │
+  └──────────┴──────────┴──────────┴──────────┘
+
+Token验证:
+  · 所有 /api/ocr/** 请求需携带 Authorization: Bearer {token}
+  · 拦截器解析Token获取 tenantId, userId, userName
+  · Token有效期: 24小时
+```
+
+### 13.4 模拟回调接收
+
+```
+DEMO内置回调接收接口:
+  POST /api/demo/callback/receive
+
+  · 接收OCR识别结果回调
+  · 打印到日志 + 存入内存列表
+  · 提供查询接口查看已接收的回调数据
+
+  GET /api/demo/callback/list
+  → 返回所有已接收的回调数据列表
+```
+
+### 13.5 DEMO启动方式
+
+```bash
+# 方式1: 使用H2内存数据库（零配置启动）
+mvn spring-boot:run -pl ocr-demo -Dspring.profiles.active=h2
+
+# 方式2: 使用MySQL（需要先创建数据库）
+mvn spring-boot:run -pl ocr-demo -Dspring.profiles.active=mysql
+
+# 方式3: Docker Compose一键启动（含MySQL+Redis+MinIO+RabbitMQ）
+docker-compose -f deploy/docker/docker-compose-demo.yml up
+```
+
+---
+
+## 14. 项目模块结构
 
 ```
 ocr-agent/                              # OCR识别模块（嵌入宿主系统）
@@ -1863,12 +2031,32 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 │               │   └── spring.factories # 自动配置注册
 │               └── db/migration/        # Flyway迁移脚本
 │
+├── ocr-demo/                            # 测试DEMO宿主系统
+│   └── src/main/java/
+│       └── com.ocr.demo/
+│           ├── OcrDemoApplication        # 启动类
+│           ├── config/
+│           │   ├── SecurityConfig        # Spring Security配置
+│           │   └── WebMvcConfig          # Web配置
+│           ├── auth/
+│           │   ├── JwtTokenProvider      # JWT Token生成/解析
+│           │   ├── JwtAuthFilter         # JWT认证过滤器
+│           │   └── AuthController        # 登录接口
+│           ├── mock/
+│           │   ├── MockCallbackController # 模拟回调接收
+│           │   └── MockDataInitializer    # 测试数据初始化
+│           └── resources/
+│               ├── application.yml        # 主配置
+│               ├── application-h2.yml     # H2内存库配置
+│               └── application-mysql.yml  # MySQL配置
+│
 ├── ocr-frontend/                        # 前端模块
 │   ├── src/
 │   │   ├── views/
 │   │   │   ├── upload/                  # 文件上传页
 │   │   │   ├── task/                    # 任务查询页
-│   │   │   ├── file/                    # 文件列表页
+│   │   │   ├── file/                    # 文件列表页（任务内）
+│   │   │   ├── record/                  # 识别记录页（独立文件查询，可按供应商）
 │   │   │   ├── review/                  # 人工审核页
 │   │   │   └── config/                  # 系统配置页（类型/字段/阈值/存储）
 │   │   ├── components/
@@ -1904,7 +2092,7 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-## 14. K8s部署架构
+## 15. K8s部署架构
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -1953,7 +2141,7 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-## 15. 安全设计
+## 16. 安全设计
 
 | 安全策略 | 实现方式 |
 |----------|----------|
@@ -1969,7 +2157,7 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-## 16. 监控与告警
+## 17. 监控与告警
 
 | 监控维度 | 工具 | 关键指标 |
 |----------|------|----------|
@@ -1983,7 +2171,7 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-## 17. 开发计划（建议）
+## 18. 开发计划（建议）
 
 | 阶段 | 内容 | 建议工期 |
 |------|------|----------|
@@ -2000,7 +2188,7 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-## 18. 风险与对策
+## 19. 风险与对策
 
 | 风险 | 对策 |
 |------|------|
@@ -2016,8 +2204,8 @@ ocr-agent/                              # OCR识别模块（嵌入宿主系统�
 
 ---
 
-*文档版本: v2.0*
+*文档版本: v2.1*
 *创建日期: 2026-02-23*
 *更新日期: 2026-02-23*
-*更新说明: 根据12条确认反馈全面修订*
+*更新说明: v2.1 新增独立文件查询页面(按供应商跨任务查询) + 测试DEMO宿主系统设计*
 *作者: OCR Agent System*
