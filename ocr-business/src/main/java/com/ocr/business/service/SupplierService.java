@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ocr.api.dto.SupplierSyncRequest;
 import com.ocr.business.entity.OcrSupplier;
 import com.ocr.business.mapper.OcrSupplierMapper;
+import com.ocr.common.context.OcrUserContext;
+import com.ocr.common.exception.OcrException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -28,7 +30,11 @@ public class SupplierService {
     public Map<String, Integer> syncSuppliers(SupplierSyncRequest request) {
         int insertCount = 0;
         int updateCount = 0;
-        String tenantId = request.getTenantId();
+        String currentTenant = OcrUserContext.getTenantId();
+        String tenantId = (currentTenant != null) ? currentTenant : request.getTenantId();
+        if (tenantId == null || tenantId.isEmpty()) {
+            throw new OcrException(400, "租户ID不能为空");
+        }
 
         for (SupplierSyncRequest.SupplierItem item : request.getSuppliers()) {
             OcrSupplier existing = supplierMapper.selectOne(

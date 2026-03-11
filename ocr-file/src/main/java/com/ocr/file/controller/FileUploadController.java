@@ -11,13 +11,17 @@ import com.ocr.common.constants.OcrConstants;
 import com.ocr.common.context.OcrUserContext;
 import com.ocr.common.exception.OcrException;
 import com.ocr.common.result.R;
+import com.ocr.file.storage.MinioStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -34,25 +38,32 @@ public class FileUploadController {
     private final OcrRecognitionFileMapper fileMapper;
     private final RabbitTemplate rabbitTemplate;
 
+    @Autowired(required = false)
+    private MinioStorageService minioStorageService;
+
     @PostMapping("/recognize")
     public R<Map<String, Object>> recognize(
             @RequestParam("files") MultipartFile[] files,
             @RequestParam("docTypeCode") String docTypeCode,
             @RequestParam("callbackUrl") String callbackUrl) {
 
+        String tenantId = OcrUserContext.getTenantId();
+        if (tenantId == null || tenantId.isEmpty()) {
+            throw new OcrException(401, "未登录或租户信息缺失");
+        }
         if (files == null || files.length == 0) {
             throw new OcrException(400, "请至少上传一个文件");
         }
         if (files.length > OcrConstants.MAX_UPLOAD_FILES) {
             throw new OcrException(400, "单次最多上传" + OcrConstants.MAX_UPLOAD_FILES + "个文件");
         }
+        validateCallbackUrl(callbackUrl);
 
         OcrDocumentType docType = docTypeService.getByCode(docTypeCode);
         if (docType == null) {
             throw new OcrException(400, "单据类型不存在: " + docTypeCode);
         }
 
-        String tenantId = OcrUserContext.getTenantId();
         double threshold = thresholdService.getThreshold(tenantId, docType.getId());
 
         String taskNo = "OCR" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS"));
@@ -75,10 +86,20 @@ public class FileUploadController {
         for (MultipartFile file : files) {
             validateFile(file);
 
+            String fileUrl = null;
+            if (minioStorageService != null) {
+                try {
+                    fileUrl = minioStorageService.upload(file, tenantId);
+                } catch (Exception e) {
+                    log.error("文件上传MinIO失败: {}", file.getOriginalFilename(), e);
+                }
+            }
+
             OcrRecognitionFile fileRecord = new OcrRecognitionFile();
             fileRecord.setTenantId(tenantId);
             fileRecord.setTaskId(task.getId());
             fileRecord.setFileName(file.getOriginalFilename());
+            fileRecord.setFileUrl(fileUrl);
             fileRecord.setFileType(getFileExtension(file.getOriginalFilename()));
             fileRecord.setFileSize(file.getSize());
             fileRecord.setStatus("PENDING");
@@ -96,12 +117,16 @@ public class FileUploadController {
             message.put("docTypeId", docType.getId());
             message.put("callbackUrl", callbackUrl);
             message.put("threshold", threshold);
+            message.put("fileUrl", fileUrl);
 
             try {
                 rabbitTemplate.convertAndSend(OcrConstants.MQ_EXCHANGE,
                         OcrConstants.MQ_ROUTING_KEY_RECOGNIZE, message);
             } catch (Exception e) {
-                log.warn("MQ发送失败，文件ID: {}，将在下次重试", fileRecord.getId(), e);
+                log.error("MQ发送失败，文件ID: {}，标记为失败", fileRecord.getId(), e);
+                fileRecord.setStatus("FAILED");
+                fileRecord.setErrorMessage("消息队列发送失败: " + e.getMessage());
+                fileMapper.updateById(fileRecord);
             }
         }
 
@@ -113,6 +138,30 @@ public class FileUploadController {
         data.put("fileIds", fileIds);
 
         return R.ok(data);
+    }
+
+    private void validateCallbackUrl(String callbackUrl) {
+        if (callbackUrl == null || callbackUrl.isBlank()) {
+            throw new OcrException(400, "回调地址不能为空");
+        }
+        try {
+            URL url = new URL(callbackUrl);
+            String protocol = url.getProtocol();
+            if (!"http".equals(protocol) && !"https".equals(protocol)) {
+                throw new OcrException(400, "回调地址协议必须为http或https");
+            }
+            String host = url.getHost();
+            if (host == null || host.isEmpty()) {
+                throw new OcrException(400, "回调地址主机名无效");
+            }
+            if ("127.0.0.1".equals(host) || "0.0.0.0".equals(host) || host.startsWith("169.254.") || host.startsWith("10.")) {
+                if (!callbackUrl.contains("localhost") && !callbackUrl.contains("demo")) {
+                    log.warn("回调地址指向内网IP: {}", callbackUrl);
+                }
+            }
+        } catch (MalformedURLException e) {
+            throw new OcrException(400, "回调地址格式无效: " + callbackUrl);
+        }
     }
 
     private void validateFile(MultipartFile file) {

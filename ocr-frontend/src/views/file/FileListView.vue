@@ -8,6 +8,9 @@
     </template>
 
     <el-form :inline="true" style="margin-bottom: 16px;">
+      <el-form-item label="文件名">
+        <el-input v-model="query.fileName" placeholder="文件名" clearable style="width: 160px;" />
+      </el-form-item>
       <el-form-item label="状态">
         <el-select v-model="query.status" placeholder="全部" clearable style="width: 140px;">
           <el-option label="成功" value="SUCCESS" />
@@ -25,14 +28,14 @@
       <el-table-column prop="fileName" label="文件名" min-width="180" />
       <el-table-column label="供应商" width="160">
         <template #default="{ row }">
-          <span v-if="row.supplierMatched === 1" style="color: #67c23a;">{{ row.supplierId ? '已匹配' : '--' }}</span>
+          <span v-if="row.supplierMatched === 1" style="color: #67c23a;">已匹配</span>
           <el-tag v-else type="danger" size="small">未匹配</el-tag>
         </template>
       </el-table-column>
       <el-table-column label="置信度" width="100" align="center">
         <template #default="{ row }">
           <span :style="{ color: confColor(row.overallConf, row.thresholdUsed) }">
-            {{ row.overallConf ? row.overallConf + '%' : '--' }}
+            {{ row.overallConf != null ? row.overallConf + '%' : '--' }}
           </span>
         </template>
       </el-table-column>
@@ -55,7 +58,6 @@
         <template #default="{ row }">
           <el-button v-if="row.status === 'NEED_REVIEW'" type="warning" link @click="$router.push(`/review/${row.id}`)">审核</el-button>
           <el-button type="primary" link @click="showJson(row)">JSON</el-button>
-          <el-button type="info" link @click="showDetail(row)">详情</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -67,12 +69,18 @@
     <el-dialog v-model="jsonVisible" title="识别结果JSON" width="70%">
       <el-tabs v-model="jsonTab">
         <el-tab-pane label="结构化结果" name="result">
-          <vue-json-pretty :data="currentJson.result" :deep="3" />
+          <vue-json-pretty v-if="currentJson.result" :data="currentJson.result" :deep="3" />
+          <el-empty v-else description="暂无数据" />
         </el-tab-pane>
         <el-tab-pane label="百度OCR原始返回" name="raw">
-          <vue-json-pretty :data="currentJson.raw" :deep="3" />
+          <vue-json-pretty v-if="currentJson.raw" :data="currentJson.raw" :deep="3" />
+          <el-empty v-else description="暂无数据" />
         </el-tab-pane>
       </el-tabs>
+      <template #footer>
+        <el-button @click="copyJson">复制JSON</el-button>
+        <el-button type="primary" @click="downloadJson">下载JSON</el-button>
+      </template>
     </el-dialog>
   </el-card>
 </template>
@@ -80,6 +88,7 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
 import { ocrApi } from '../../api/ocr'
+import { ElMessage } from 'element-plus'
 import VueJsonPretty from 'vue-json-pretty'
 import 'vue-json-pretty/lib/styles.css'
 
@@ -87,37 +96,62 @@ const props = defineProps({ taskId: String })
 const files = ref([])
 const total = ref(0)
 const loading = ref(false)
-const query = reactive({ page: 1, size: 20, status: '' })
+const query = reactive({ page: 1, size: 20, status: '', fileName: '' })
 const jsonVisible = ref(false)
 const jsonTab = ref('result')
 const currentJson = reactive({ result: null, raw: null })
+const jsonLoading = ref(false)
 
 const loadFiles = async () => {
   loading.value = true
-  const res = await ocrApi.getTaskFiles(props.taskId, { page: query.page, size: query.size, status: query.status || undefined })
-  files.value = res.data.data?.list || []
-  total.value = res.data.data?.total || 0
-  loading.value = false
+  try {
+    const res = await ocrApi.getTaskFiles(props.taskId, { page: query.page, size: query.size, status: query.status || undefined })
+    files.value = res.data.data?.list || []
+    total.value = res.data.data?.total || 0
+  } catch (e) {
+    ElMessage.error('查询文件列表失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 const showJson = async (row) => {
-  const res = await ocrApi.getFile(row.id)
-  currentJson.result = res.data.data?.resultJson
-  currentJson.raw = res.data.data?.ocrRawJson
-  jsonTab.value = 'result'
-  jsonVisible.value = true
+  jsonLoading.value = true
+  try {
+    const [fileRes, rawRes] = await Promise.all([
+      ocrApi.getFile(row.id),
+      ocrApi.getRawJson(row.id)
+    ])
+    currentJson.result = fileRes.data.data?.resultJson || null
+    currentJson.raw = rawRes.data.data || null
+    jsonTab.value = 'result'
+    jsonVisible.value = true
+  } catch (e) {
+    ElMessage.error('获取JSON数据失败')
+  } finally {
+    jsonLoading.value = false
+  }
 }
 
-const showDetail = async (row) => {
-  const res = await ocrApi.getFile(row.id)
-  currentJson.result = res.data.data
-  currentJson.raw = null
-  jsonTab.value = 'result'
-  jsonVisible.value = true
+const copyJson = () => {
+  const data = jsonTab.value === 'result' ? currentJson.result : currentJson.raw
+  if (data) {
+    navigator.clipboard.writeText(JSON.stringify(data, null, 2)).then(() => ElMessage.success('已复制'))
+  }
+}
+
+const downloadJson = () => {
+  const data = jsonTab.value === 'result' ? currentJson.result : currentJson.raw
+  if (!data) return
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = `ocr_result_${jsonTab.value}.json`; a.click()
+  URL.revokeObjectURL(url)
 }
 
 const confColor = (conf, threshold) => {
-  if (!conf) return '#909399'
+  if (conf == null) return '#909399'
   if (conf >= (threshold || 95)) return '#67c23a'
   if (conf >= 60) return '#e6a23c'
   return '#f56c6c'

@@ -37,8 +37,12 @@
 
     <el-table :data="records" stripe v-loading="loading">
       <el-table-column prop="fileName" label="文件名" min-width="180" />
-      <el-table-column prop="taskId" label="所属任务" width="100" />
-      <el-table-column label="供应商" width="160">
+      <el-table-column label="所属任务" width="100">
+        <template #default="{ row }">
+          <el-button type="primary" link @click="$router.push(`/task/${row.taskId}/files`)">{{ row.taskId }}</el-button>
+        </template>
+      </el-table-column>
+      <el-table-column label="供应商" width="130">
         <template #default="{ row }">
           <span v-if="row.supplierMatched === 1" style="color: #67c23a;">已匹配</span>
           <el-tag v-else type="danger" size="small">未匹配</el-tag>
@@ -47,7 +51,7 @@
       <el-table-column label="置信度" width="100" align="center">
         <template #default="{ row }">
           <span :style="{ color: confColor(row.overallConf) }">
-            {{ row.overallConf ? row.overallConf + '%' : '--' }}
+            {{ row.overallConf != null ? row.overallConf + '%' : '--' }}
           </span>
         </template>
       </el-table-column>
@@ -71,7 +75,12 @@
       @change="loadRecords" />
 
     <el-dialog v-model="jsonVisible" title="识别结果JSON" width="70%">
-      <vue-json-pretty :data="currentJson" :deep="3" />
+      <vue-json-pretty v-if="currentJson" :data="currentJson" :deep="3" />
+      <el-empty v-else description="暂无数据" />
+      <template #footer>
+        <el-button @click="copyJson">复制JSON</el-button>
+        <el-button type="primary" @click="downloadJson">下载JSON</el-button>
+      </template>
     </el-dialog>
   </el-card>
 </template>
@@ -79,6 +88,7 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
 import { ocrApi } from '../../api/ocr'
+import { ElMessage } from 'element-plus'
 import VueJsonPretty from 'vue-json-pretty'
 import 'vue-json-pretty/lib/styles.css'
 
@@ -91,21 +101,26 @@ const query = reactive({ page: 1, size: 20, supplierName: '', fileName: '', stat
 
 const loadRecords = async () => {
   loading.value = true
-  const params = {
-    page: query.page, size: query.size,
-    supplierName: query.supplierName || undefined,
-    fileName: query.fileName || undefined,
-    status: query.status || undefined,
-    supplierMatched: query.supplierMatched !== null ? query.supplierMatched : undefined
+  try {
+    const params = {
+      page: query.page, size: query.size,
+      supplierName: query.supplierName || undefined,
+      fileName: query.fileName || undefined,
+      status: query.status || undefined,
+      supplierMatched: query.supplierMatched != null ? query.supplierMatched : undefined
+    }
+    if (query.dateRange) {
+      params.startDate = query.dateRange[0]
+      params.endDate = query.dateRange[1]
+    }
+    const res = await ocrApi.getFiles(params)
+    records.value = res.data.data?.list || []
+    total.value = res.data.data?.total || 0
+  } catch (e) {
+    ElMessage.error('查询识别记录失败')
+  } finally {
+    loading.value = false
   }
-  if (query.dateRange) {
-    params.startDate = query.dateRange[0]
-    params.endDate = query.dateRange[1]
-  }
-  const res = await ocrApi.getFiles(params)
-  records.value = res.data.data?.list || []
-  total.value = res.data.data?.total || 0
-  loading.value = false
 }
 
 const resetQuery = () => {
@@ -114,13 +129,32 @@ const resetQuery = () => {
 }
 
 const showJson = async (row) => {
-  const res = await ocrApi.getFile(row.id)
-  currentJson.value = res.data.data
-  jsonVisible.value = true
+  try {
+    const res = await ocrApi.getFile(row.id)
+    currentJson.value = res.data.data || null
+    jsonVisible.value = true
+  } catch (e) {
+    ElMessage.error('获取数据失败')
+  }
+}
+
+const copyJson = () => {
+  if (currentJson.value) {
+    navigator.clipboard.writeText(JSON.stringify(currentJson.value, null, 2)).then(() => ElMessage.success('已复制'))
+  }
+}
+
+const downloadJson = () => {
+  if (!currentJson.value) return
+  const blob = new Blob([JSON.stringify(currentJson.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = 'ocr_record.json'; a.click()
+  URL.revokeObjectURL(url)
 }
 
 const confColor = (conf) => {
-  if (!conf) return '#909399'
+  if (conf == null) return '#909399'
   if (conf >= 95) return '#67c23a'
   if (conf >= 60) return '#e6a23c'
   return '#f56c6c'

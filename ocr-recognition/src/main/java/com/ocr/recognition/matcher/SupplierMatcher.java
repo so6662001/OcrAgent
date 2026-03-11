@@ -55,6 +55,7 @@ public class SupplierMatcher {
         String cleaned = ocrSupplierText.replaceAll("\\s+", "").trim();
 
         for (OcrSupplier supplier : suppliers) {
+            if (supplier.getSupplierName() == null) continue;
             String name = supplier.getSupplierName().replaceAll("\\s+", "").trim();
             if (name.equals(cleaned)) {
                 fillResult(result, supplier, "EXACT", 100);

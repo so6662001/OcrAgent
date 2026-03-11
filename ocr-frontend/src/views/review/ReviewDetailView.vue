@@ -4,6 +4,8 @@
       <div style="display: flex; justify-content: space-between; align-items: center;">
         <span style="font-size: 18px; font-weight: bold;">人工审核 — {{ file?.fileName }}</span>
         <div>
+          <el-button :disabled="!hasPrev" @click="goPrev">上一个</el-button>
+          <el-button :disabled="!hasNext" @click="goNext">下一个</el-button>
           <el-button @click="$router.push('/review')">返回列表</el-button>
         </div>
       </div>
@@ -13,10 +15,15 @@
       <el-col :span="10">
         <el-card shadow="never">
           <template #header>原始文件预览</template>
-          <div style="text-align: center; color: #909399; padding: 60px 0;">
-            <el-icon style="font-size: 48px;"><Picture /></el-icon>
+          <div v-if="file.fileUrl && isImage(file.fileType)" style="text-align: center;">
+            <img :src="file.fileUrl" style="max-width: 100%; max-height: 500px;" alt="原始文件" />
+          </div>
+          <div v-else style="text-align: center; color: #909399; padding: 60px 0;">
+            <el-icon style="font-size: 48px;"><Document /></el-icon>
             <div style="margin-top: 10px;">{{ file.fileName }}</div>
-            <div style="font-size: 12px; margin-top: 5px;">文件预览需要MinIO服务支持</div>
+            <div style="font-size: 12px; margin-top: 5px;">{{ file.fileUrl ? '点击下载查看' : '文件预览需要MinIO服务' }}</div>
+            <el-button v-if="file.fileUrl" type="primary" link style="margin-top: 8px;"
+              @click="window.open(file.fileUrl)">下载文件</el-button>
           </div>
         </el-card>
       </el-col>
@@ -36,11 +43,13 @@
           <template #header>表头信息</template>
           <el-descriptions :column="2" border v-if="headerFields.length">
             <el-descriptions-item v-for="(f, i) in headerFields" :key="i" :label="f.fieldName">
-              <el-input v-model="f.editValue" :class="confClass(f.confidence)"
-                :style="{ borderColor: confBorderColor(f.confidence) }" size="small" />
-              <el-tag :type="confTagType(f.confidence)" size="small" style="margin-left: 8px;">
-                {{ f.confidence }}%
-              </el-tag>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <el-input v-model="f.editValue" size="small"
+                  :style="{ borderColor: confBorderColor(f.confidence) }" />
+                <el-tag :type="confTagType(f.confidence)" size="small" style="flex-shrink: 0;">
+                  {{ f.confidence != null ? f.confidence + '%' : '--' }}
+                </el-tag>
+              </div>
             </el-descriptions-item>
           </el-descriptions>
           <el-empty v-else description="无表头数据" :image-size="40" />
@@ -55,7 +64,7 @@
                   <el-input v-model="row[col.fieldCode].editValue" size="small"
                     :style="{ borderColor: confBorderColor(row[col.fieldCode].confidence) }" />
                   <el-tag :type="confTagType(row[col.fieldCode].confidence)" size="small" style="margin-top: 4px;">
-                    {{ row[col.fieldCode].confidence }}%
+                    {{ row[col.fieldCode].confidence != null ? row[col.fieldCode].confidence + '%' : '--' }}
                   </el-tag>
                 </div>
               </template>
@@ -70,10 +79,10 @@
             <span style="color: #67c23a;">绿色(≥阈值)</span>
             <span style="color: #e6a23c; margin-left: 8px;">橙色(60%~阈值)</span>
             <span style="color: #f56c6c; margin-left: 8px;">红色(&lt;60%)</span>
-            | 当前阈值: {{ file.thresholdUsed }}%
+            | 当前阈值: {{ file.thresholdUsed || 95 }}%
           </div>
           <el-button type="primary" size="large" @click="submitConfirm" :loading="submitting">确认提交</el-button>
-          <el-button size="large" @click="$router.push('/review')">跳过</el-button>
+          <el-button size="large" @click="goNext" :disabled="!hasNext">跳过</el-button>
         </div>
       </el-col>
     </el-row>
@@ -81,13 +90,14 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, reactive } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { ocrApi } from '../../api/ocr'
 import { ElMessage } from 'element-plus'
 
 const props = defineProps({ fileId: String })
 const router = useRouter()
+const route = useRoute()
 const file = ref(null)
 const loading = ref(false)
 const submitting = ref(false)
@@ -98,55 +108,102 @@ const headerFields = ref([])
 const bodyRows = ref([])
 const bodyColumns = ref([])
 
-onMounted(async () => {
-  loading.value = true
-  const [fileRes, supplierRes] = await Promise.all([
-    ocrApi.getFile(props.fileId),
-    ocrApi.getSuppliers('')
-  ])
-  file.value = fileRes.data.data
-  suppliers.value = supplierRes.data.data || []
+const reviewList = ref([])
+const currentIndex = ref(-1)
+const hasPrev = ref(false)
+const hasNext = ref(false)
 
-  if (file.value?.resultJson) {
-    const result = typeof file.value.resultJson === 'string' ? JSON.parse(file.value.resultJson) : file.value.resultJson
-    if (result.header) {
-      headerFields.value = result.header.map(h => ({ ...h, editValue: h.value }))
-    }
-    if (result.body) {
-      const colSet = new Map()
-      result.body.forEach(row => {
-        row.cells?.forEach(c => {
-          if (!colSet.has(c.fieldCode)) colSet.set(c.fieldCode, c.fieldName)
-        })
-      })
-      bodyColumns.value = [...colSet.entries()].map(([fieldCode, fieldName]) => ({ fieldCode, fieldName }))
+const loadReviewList = async () => {
+  try {
+    const res = await ocrApi.getFiles({ page: 1, size: 200, status: 'NEED_REVIEW' })
+    reviewList.value = res.data.data?.list || []
+    currentIndex.value = reviewList.value.findIndex(f => String(f.id) === String(props.fileId))
+    hasPrev.value = currentIndex.value > 0
+    hasNext.value = currentIndex.value < reviewList.value.length - 1
+  } catch { /* ignore */ }
+}
 
-      bodyRows.value = result.body.map(row => {
-        const mapped = {}
-        row.cells?.forEach(c => { mapped[c.fieldCode] = { ...c, editValue: c.value } })
-        return mapped
-      })
-    }
+const goPrev = () => {
+  if (currentIndex.value > 0) {
+    router.push(`/review/${reviewList.value[currentIndex.value - 1].id}`)
   }
-  loading.value = false
-})
+}
+
+const goNext = () => {
+  if (currentIndex.value < reviewList.value.length - 1) {
+    router.push(`/review/${reviewList.value[currentIndex.value + 1].id}`)
+  }
+}
+
+const isImage = (type) => ['jpg', 'jpeg', 'png'].includes((type || '').toLowerCase())
+
+const loadFileData = async () => {
+  loading.value = true
+  try {
+    const [fileRes, supplierRes] = await Promise.all([
+      ocrApi.getReview(props.fileId),
+      ocrApi.getSuppliers('')
+    ])
+    file.value = fileRes.data.data
+    suppliers.value = supplierRes.data.data || []
+
+    parseResult()
+  } catch (e) {
+    ElMessage.error('加载审核数据失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+const parseResult = () => {
+  headerFields.value = []
+  bodyRows.value = []
+  bodyColumns.value = []
+
+  if (!file.value?.resultJson) return
+
+  let result
+  try {
+    result = typeof file.value.resultJson === 'string' ? JSON.parse(file.value.resultJson) : file.value.resultJson
+  } catch (e) {
+    ElMessage.warning('识别结果JSON解析失败')
+    return
+  }
+
+  if (result.header && Array.isArray(result.header)) {
+    headerFields.value = result.header.map(h => ({ ...h, editValue: h.value || '' }))
+  }
+  if (result.body && Array.isArray(result.body)) {
+    const colSet = new Map()
+    result.body.forEach(row => {
+      if (row.cells && Array.isArray(row.cells)) {
+        row.cells.forEach(c => {
+          if (c.fieldCode && !colSet.has(c.fieldCode)) colSet.set(c.fieldCode, c.fieldName || c.fieldCode)
+        })
+      }
+    })
+    bodyColumns.value = [...colSet.entries()].map(([fieldCode, fieldName]) => ({ fieldCode, fieldName }))
+
+    bodyRows.value = result.body.map(row => {
+      const mapped = {}
+      if (row.cells && Array.isArray(row.cells)) {
+        row.cells.forEach(c => { if (c.fieldCode) mapped[c.fieldCode] = { ...c, editValue: c.value || '' } })
+      }
+      return mapped
+    })
+  }
+}
 
 const confBorderColor = (conf) => {
-  if (!conf) return '#dcdfe6'
+  if (conf == null) return '#dcdfe6'
   const t = file.value?.thresholdUsed || 95
   if (conf >= t) return '#67c23a'
   if (conf >= 60) return '#e6a23c'
   return '#f56c6c'
 }
 
-const confClass = (conf) => {
-  const t = file.value?.thresholdUsed || 95
-  if (conf >= t) return ''
-  if (conf >= 60) return ''
-  return ''
-}
-
 const confTagType = (conf) => {
+  if (conf == null) return 'info'
   const t = file.value?.thresholdUsed || 95
   if (conf >= t) return 'success'
   if (conf >= 60) return 'warning'
@@ -166,11 +223,20 @@ const submitConfirm = async () => {
     }
     await ocrApi.confirmReview(props.fileId, data)
     ElMessage.success('审核确认成功')
-    router.push('/review')
+    if (hasNext.value) {
+      goNext()
+    } else {
+      router.push('/review')
+    }
   } catch (e) {
-    ElMessage.error('提交失败')
+    ElMessage.error(e.response?.data?.message || '提交失败')
   } finally {
     submitting.value = false
   }
 }
+
+onMounted(() => {
+  loadReviewList()
+  loadFileData()
+})
 </script>

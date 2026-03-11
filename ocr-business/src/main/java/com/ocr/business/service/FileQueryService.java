@@ -31,9 +31,6 @@ public class FileQueryService {
         return fileMapper.selectPage(new Page<>(page, size), wrapper);
     }
 
-    /**
-     * 独立文件查询（跨任务），支持按供应商筛选
-     */
     public Page<OcrRecognitionFile> queryFiles(int page, int size, String supplierName,
                                                 Boolean supplierMatched, String status,
                                                 String fileName, LocalDate startDate, LocalDate endDate) {
@@ -79,6 +76,10 @@ public class FileQueryService {
         OcrRecognitionFile file = fileMapper.selectById(fileId);
         if (file == null) {
             throw new OcrException(404, "文件不存在: " + fileId);
+        }
+        String tenantId = OcrUserContext.getTenantId();
+        if (tenantId != null && !tenantId.equals(file.getTenantId())) {
+            throw new OcrException(403, "无权访问该文件");
         }
         return file;
     }

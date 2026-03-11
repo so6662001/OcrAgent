@@ -55,6 +55,9 @@ public class MinioStorageService {
     }
 
     public String upload(MultipartFile file, String tenantId) {
+        if (minioClient == null) {
+            throw new OcrException("MinIO未初始化，无法上传文件");
+        }
         String datePath = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
         String ext = getFileExtension(file.getOriginalFilename());
         String objectName = tenantId + "/" + datePath + "/" + UUID.randomUUID() + "." + ext;
@@ -73,6 +76,7 @@ public class MinioStorageService {
     }
 
     public String getPresignedUrl(String objectName) {
+        if (minioClient == null) throw new OcrException("MinIO未初始化");
         try {
             return minioClient.getPresignedObjectUrl(GetPresignedObjectUrlArgs.builder()
                     .bucket(bucket)
@@ -86,6 +90,7 @@ public class MinioStorageService {
     }
 
     public InputStream getFile(String objectName) {
+        if (minioClient == null) throw new OcrException("MinIO未初始化");
         try {
             return minioClient.getObject(GetObjectArgs.builder()
                     .bucket(bucket)

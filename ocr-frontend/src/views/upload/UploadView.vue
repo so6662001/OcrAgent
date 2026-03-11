@@ -65,8 +65,12 @@ const form = reactive({
 })
 
 onMounted(async () => {
-  const res = await ocrApi.getDocTypes()
-  docTypes.value = res.data.data || []
+  try {
+    const res = await ocrApi.getDocTypes()
+    docTypes.value = res.data.data || []
+  } catch (e) {
+    ElMessage.error('加载单据类型失败')
+  }
 })
 
 const handleChange = (file, list) => { fileList.value = list }

@@ -68,8 +68,18 @@ public class BaiduTokenManager {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             JsonNode json = objectMapper.readTree(response.body());
 
+            if (json.has("error")) {
+                log.error("百度Token获取失败: error={}, description={}",
+                        json.get("error").asText(), json.path("error_description").asText());
+                return null;
+            }
+            if (!json.has("access_token")) {
+                log.error("百度Token响应缺少access_token: {}", response.body());
+                return null;
+            }
+
             String accessToken = json.get("access_token").asText();
-            long expiresIn = json.get("expires_in").asLong();
+            long expiresIn = json.path("expires_in").asLong(7200);
 
             redisTemplate.opsForValue().set(REDIS_KEY, accessToken,
                     expiresIn - 600, TimeUnit.SECONDS);

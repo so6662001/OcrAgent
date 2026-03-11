@@ -16,11 +16,16 @@ http.interceptors.request.use(config => {
 http.interceptors.response.use(
   response => response,
   error => {
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 || error.response?.status === 403) {
       localStorage.removeItem('ocr_token')
-      window.location.reload()
+      localStorage.removeItem('ocr_tenantId')
+      localStorage.removeItem('ocr_userId')
+      localStorage.removeItem('ocr_userName')
+      ElMessage.error('登录已过期，请重新登录')
+      setTimeout(() => window.location.reload(), 1000)
     } else {
-      ElMessage.error(error.response?.data?.message || '请求失败')
+      const msg = error.response?.data?.message || error.message || '请求失败'
+      ElMessage.error(msg)
     }
     return Promise.reject(error)
   }

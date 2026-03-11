@@ -8,6 +8,11 @@
       <el-form-item label="任务编号">
         <el-input v-model="query.taskNo" placeholder="任务编号" clearable />
       </el-form-item>
+      <el-form-item label="单据类型">
+        <el-select v-model="query.docTypeCode" placeholder="全部" clearable style="width: 140px;">
+          <el-option v-for="t in docTypes" :key="t.typeCode" :label="t.typeName" :value="t.typeCode" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="状态">
         <el-select v-model="query.status" placeholder="全部" clearable style="width: 140px;">
           <el-option label="处理中" value="PROCESSING" />
@@ -28,7 +33,7 @@
     <el-table :data="tasks" stripe v-loading="loading">
       <el-table-column prop="taskNo" label="任务编号" width="200" />
       <el-table-column label="单据类型" width="120">
-        <template #default="{ row }">{{ row.docTypeId }}</template>
+        <template #default="{ row }">{{ docTypeMap[row.docTypeId] || row.docTypeId }}</template>
       </el-table-column>
       <el-table-column prop="totalFiles" label="文件数" width="80" align="center" />
       <el-table-column prop="successCount" label="成功" width="70" align="center" />
@@ -56,34 +61,57 @@
 </template>
 
 <script setup>
-import { ref, onMounted, reactive } from 'vue'
+import { ref, onMounted, reactive, computed } from 'vue'
 import { ocrApi } from '../../api/ocr'
+import { ElMessage } from 'element-plus'
 
 const tasks = ref([])
 const total = ref(0)
 const loading = ref(false)
-const query = reactive({ page: 1, size: 20, taskNo: '', status: '', dateRange: null })
+const docTypes = ref([])
+const query = reactive({ page: 1, size: 20, taskNo: '', docTypeCode: '', status: '', dateRange: null })
+
+const docTypeMap = computed(() => {
+  const m = {}
+  docTypes.value.forEach(t => { m[t.id] = t.typeName })
+  return m
+})
 
 const loadTasks = async () => {
   loading.value = true
-  const params = { page: query.page, size: query.size, status: query.status || undefined }
-  if (query.dateRange) {
-    params.startDate = query.dateRange[0]
-    params.endDate = query.dateRange[1]
+  try {
+    const params = {
+      page: query.page, size: query.size,
+      status: query.status || undefined,
+      docTypeCode: query.docTypeCode || undefined
+    }
+    if (query.dateRange) {
+      params.startDate = query.dateRange[0]
+      params.endDate = query.dateRange[1]
+    }
+    const res = await ocrApi.getTasks(params)
+    tasks.value = res.data.data?.list || []
+    total.value = res.data.data?.total || 0
+  } catch (e) {
+    ElMessage.error('查询任务失败')
+  } finally {
+    loading.value = false
   }
-  const res = await ocrApi.getTasks(params)
-  tasks.value = res.data.data?.list || []
-  total.value = res.data.data?.total || 0
-  loading.value = false
 }
 
 const resetQuery = () => {
-  query.page = 1; query.taskNo = ''; query.status = ''; query.dateRange = null
+  Object.assign(query, { page: 1, taskNo: '', docTypeCode: '', status: '', dateRange: null })
   loadTasks()
 }
 
 const statusType = (s) => ({ PROCESSING: 'warning', PARTIAL_DONE: 'warning', DONE: 'success', ALL_CALLBACK: 'success' }[s] || 'info')
 const statusText = (s) => ({ UPLOADING: '上传中', PROCESSING: '处理中', PARTIAL_DONE: '部分完成', DONE: '已完成', ALL_CALLBACK: '全部回调' }[s] || s)
 
-onMounted(loadTasks)
+onMounted(async () => {
+  try {
+    const res = await ocrApi.getDocTypes()
+    docTypes.value = res.data.data || []
+  } catch { /* ignore */ }
+  loadTasks()
+})
 </script>

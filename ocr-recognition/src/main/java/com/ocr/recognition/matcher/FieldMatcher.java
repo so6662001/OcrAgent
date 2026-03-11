@@ -23,6 +23,10 @@ public class FieldMatcher {
      * 将OCR识别出的标签名映射到系统定义的字段
      */
     public OcrFieldDefinition matchField(String ocrLabel, Long docTypeId) {
+        if (ocrLabel == null || ocrLabel.isBlank() || docTypeId == null) {
+            return null;
+        }
+
         List<OcrFieldDefinition> fields = fieldDefMapper.selectList(
                 new LambdaQueryWrapper<OcrFieldDefinition>()
                         .eq(OcrFieldDefinition::getDocTypeId, docTypeId)
@@ -31,6 +35,7 @@ public class FieldMatcher {
         String cleaned = ocrLabel.replaceAll("[：:：\\s]", "").trim().toLowerCase();
 
         for (OcrFieldDefinition field : fields) {
+            if (field.getFieldName() == null) continue;
             if (field.getFieldName().replaceAll("\\s+", "").equalsIgnoreCase(cleaned)) {
                 return field;
             }
@@ -41,6 +46,7 @@ public class FieldMatcher {
                     new LambdaQueryWrapper<OcrFieldAlias>()
                             .eq(OcrFieldAlias::getFieldId, field.getId()));
             for (OcrFieldAlias alias : aliases) {
+                if (alias.getAliasName() == null) continue;
                 if (alias.getAliasName().replaceAll("\\s+", "").equalsIgnoreCase(cleaned)) {
                     return field;
                 }
@@ -48,6 +54,7 @@ public class FieldMatcher {
         }
 
         for (OcrFieldDefinition field : fields) {
+            if (field.getFieldName() == null) continue;
             int similarity = calculateSimilarity(cleaned,
                     field.getFieldName().replaceAll("\\s+", "").toLowerCase());
             if (similarity >= 80) {

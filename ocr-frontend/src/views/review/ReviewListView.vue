@@ -4,12 +4,14 @@
       <span style="font-size: 18px; font-weight: bold;">人工审核</span>
     </template>
 
-    <el-table :data="files" stripe v-loading="loading">
+    <el-empty v-if="!loading && files.length === 0" description="暂无待审核文件" />
+
+    <el-table v-else :data="files" stripe v-loading="loading">
       <el-table-column prop="fileName" label="文件名" min-width="200" />
       <el-table-column prop="taskId" label="任务ID" width="100" />
       <el-table-column label="置信度" width="100" align="center">
         <template #default="{ row }">
-          <span style="color: #e6a23c; font-weight: bold;">{{ row.overallConf }}%</span>
+          <span style="color: #e6a23c; font-weight: bold;">{{ row.overallConf != null ? row.overallConf + '%' : '--' }}</span>
         </template>
       </el-table-column>
       <el-table-column label="供应商" width="120">
@@ -35,6 +37,7 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
 import { ocrApi } from '../../api/ocr'
+import { ElMessage } from 'element-plus'
 
 const files = ref([])
 const total = ref(0)
@@ -43,10 +46,15 @@ const query = reactive({ page: 1, size: 20 })
 
 const loadFiles = async () => {
   loading.value = true
-  const res = await ocrApi.getFiles({ page: query.page, size: query.size, status: 'NEED_REVIEW' })
-  files.value = res.data.data?.list || []
-  total.value = res.data.data?.total || 0
-  loading.value = false
+  try {
+    const res = await ocrApi.getFiles({ page: query.page, size: query.size, status: 'NEED_REVIEW' })
+    files.value = res.data.data?.list || []
+    total.value = res.data.data?.total || 0
+  } catch (e) {
+    ElMessage.error('查询待审核文件失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(loadFiles)

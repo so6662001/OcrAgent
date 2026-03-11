@@ -52,14 +52,14 @@ public class MockDataInitializer implements CommandLineRunner {
         addField(purchaseOrder.getId(), "unit_price", "单价", "AMOUNT", "BODY", 1, 4);
         addField(purchaseOrder.getId(), "amount", "金额", "AMOUNT", "BODY", 1, 5);
 
-        addAlias("supplier_name", "供货商", "zh");
-        addAlias("supplier_name", "供方", "zh");
-        addAlias("supplier_name", "Vendor", "en");
-        addAlias("supplier_name", "Supplier", "en");
-        addAlias("total_amount", "合计", "zh");
-        addAlias("total_amount", "Total", "en");
-        addAlias("product_name", "品名", "zh");
-        addAlias("product_name", "Product", "en");
+        addAlias(fieldIdMap.get("supplier_name"), "供货商", "zh");
+        addAlias(fieldIdMap.get("supplier_name"), "供方", "zh");
+        addAlias(fieldIdMap.get("supplier_name"), "Vendor", "en");
+        addAlias(fieldIdMap.get("supplier_name"), "Supplier", "en");
+        addAlias(fieldIdMap.get("total_amount"), "合计", "zh");
+        addAlias(fieldIdMap.get("total_amount"), "Total", "en");
+        addAlias(fieldIdMap.get("product_name"), "品名", "zh");
+        addAlias(fieldIdMap.get("product_name"), "Product", "en");
 
         // 进项发票
         OcrDocumentType invoice = new OcrDocumentType();
@@ -99,7 +99,7 @@ public class MockDataInitializer implements CommandLineRunner {
         addField(inquiry.getId(), "quoted_price", "报价", "AMOUNT", "BODY", 1, 4);
     }
 
-    private Long lastFieldId;
+    private final java.util.Map<String, Long> fieldIdMap = new java.util.HashMap<>();
 
     private void addField(Long docTypeId, String code, String name, String type,
                           String position, int required, int sortOrder) {
@@ -113,12 +113,13 @@ public class MockDataInitializer implements CommandLineRunner {
         field.setSortOrder(sortOrder);
         field.setStatus(1);
         fieldDefMapper.insert(field);
-        lastFieldId = field.getId();
+        fieldIdMap.put(code, field.getId());
     }
 
-    private void addAlias(String fieldCode, String alias, String lang) {
+    private void addAlias(Long fieldId, String alias, String lang) {
+        if (fieldId == null) return;
         OcrFieldAlias a = new OcrFieldAlias();
-        a.setFieldId(lastFieldId);
+        a.setFieldId(fieldId);
         a.setAliasName(alias);
         a.setAliasLang(lang);
         a.setPriority(0);

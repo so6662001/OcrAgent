@@ -3,6 +3,7 @@ package com.ocr.business.controller;
 import com.ocr.business.entity.OcrTenantThreshold;
 import com.ocr.business.service.ThresholdService;
 import com.ocr.common.context.OcrUserContext;
+import com.ocr.common.exception.OcrException;
 import com.ocr.common.result.R;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -25,7 +26,14 @@ public class ThresholdController {
 
     @PutMapping("/{docTypeId}")
     public R<Void> set(@PathVariable Long docTypeId, @RequestBody Map<String, BigDecimal> body) {
-        thresholdService.setThreshold(docTypeId, body.get("threshold"));
+        BigDecimal threshold = body.get("threshold");
+        if (threshold == null) {
+            throw new OcrException(400, "阈值不能为空");
+        }
+        if (threshold.doubleValue() < 50 || threshold.doubleValue() > 100) {
+            throw new OcrException(400, "阈值范围为50~100");
+        }
+        thresholdService.setThreshold(docTypeId, threshold);
         return R.ok();
     }
 
