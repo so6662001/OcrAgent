@@ -72,12 +72,23 @@ public class FieldMappingService {
         }
     }
 
+    private static final int MAX_SYNONYMS_PER_FIELD = 100;
+    private static final int MAX_SYNONYM_LENGTH = 128;
+
     public void addSynonym(String standardKey, String newSynonym) {
+        if (standardKey == null || newSynonym == null) return;
+        newSynonym = newSynonym.trim();
+        if (newSynonym.isEmpty() || newSynonym.length() > MAX_SYNONYM_LENGTH) return;
         StandardField field = standardFields.get(standardKey);
         if (field == null) return;
+        if (field.getSynonyms().size() >= MAX_SYNONYMS_PER_FIELD) {
+            log.warn("字段 {} 的同义词数已达上限({})", standardKey, MAX_SYNONYMS_PER_FIELD);
+            return;
+        }
         field.getSynonyms().add(newSynonym);
         synonymIndex.put(newSynonym.toLowerCase().trim(), standardKey);
-        log.info("学习新同义词: {} → {}", newSynonym, field.getDisplayName());
+        String safeSynonym = newSynonym.replaceAll("[\\r\\n\\t]", " ");
+        log.info("学习新同义词: {} -> {}", safeSynonym, field.getDisplayName());
     }
 
     public List<RecognizeTaskVO.FieldVO> parseToFields(OcrRawResult rawResult) {

@@ -8,50 +8,74 @@ import com.ocragent.model.vo.BatchUploadVO;
 import com.ocragent.model.vo.RecognizeTaskVO;
 import com.ocragent.ocr.model.OcrRawResult;
 import com.ocragent.ocr.model.TextLine;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.scheduling.annotation.Async;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
+import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executor;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class RecognitionService {
 
     private final FileProcessingService fileProcessingService;
     private final OcrDispatchService ocrDispatchService;
     private final FieldMappingService fieldMappingService;
+    private final Executor ocrTaskExecutor;
+
+    private static final int MAX_TASK_STORE_SIZE = 500;
+    private static final int MAX_FIELD_VALUE_LENGTH = 2000;
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     private final Map<String, RecognizeTaskVO> taskStore = new ConcurrentHashMap<>();
+    private final Deque<String> taskOrder = new ConcurrentLinkedDeque<>();
 
-    public BatchUploadVO batchUpload(MultipartFile[] files, RecognizeMode mode) {
+    public RecognitionService(
+            FileProcessingService fileProcessingService,
+            OcrDispatchService ocrDispatchService,
+            FieldMappingService fieldMappingService,
+            @Qualifier("ocrTaskExecutor") Executor ocrTaskExecutor
+    ) {
+        this.fileProcessingService = fileProcessingService;
+        this.ocrDispatchService = ocrDispatchService;
+        this.fieldMappingService = fieldMappingService;
+        this.ocrTaskExecutor = ocrTaskExecutor;
+    }
+
+    public BatchUploadVO batchUpload(byte[][] filesData, String[] fileNames,
+                                     FileType[] fileTypes, RecognizeMode mode) {
+        fileProcessingService.validateBatchSize(filesData.length);
+
         BatchUploadVO vo = new BatchUploadVO();
-        vo.setTotalFiles(files.length);
+        vo.setTotalFiles(filesData.length);
         List<String> taskIds = new ArrayList<>();
 
-        for (MultipartFile file : files) {
-            fileProcessingService.validateFile(file);
-            String taskId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        for (int i = 0; i < filesData.length; i++) {
+            String taskId = generateTaskId();
             RecognizeTaskVO task = new RecognizeTaskVO();
             task.setTaskId(taskId);
-            task.setFileName(file.getOriginalFilename());
+            task.setFileName(sanitizeFileName(fileNames[i]));
             task.setStatus(TaskStatus.QUEUED);
+
+            evictOldTasks();
             taskStore.put(taskId, task);
+            taskOrder.addLast(taskId);
             taskIds.add(taskId);
 
-            processFileAsync(taskId, file, mode);
+            final byte[] data = filesData[i];
+            final FileType ft = fileTypes[i];
+            ocrTaskExecutor.execute(() -> processFile(taskId, data, ft, mode));
         }
 
         vo.setTaskIds(taskIds);
         return vo;
     }
 
-    @Async("ocrTaskExecutor")
-    public void processFileAsync(String taskId, MultipartFile file, RecognizeMode mode) {
+    private void processFile(String taskId, byte[] fileData, FileType fileType, RecognizeMode mode) {
         RecognizeTaskVO task = taskStore.get(taskId);
         if (task == null) return;
 
@@ -59,10 +83,6 @@ public class RecognitionService {
         long startTime = System.currentTimeMillis();
 
         try {
-            byte[] fileData = file.getBytes();
-            FileType fileType = fileProcessingService.detectFileType(file);
-            fileProcessingService.saveFile(file);
-
             OcrRawResult rawResult = ocrDispatchService.dispatch(fileData, fileType, mode);
 
             if (!rawResult.isSuccess()) {
@@ -95,17 +115,18 @@ public class RecognitionService {
             task.setProcessTimeMs(System.currentTimeMillis() - startTime);
             task.setStatus(TaskStatus.COMPLETED);
 
-            log.info("文件 [{}] 识别完成, 耗时 {}ms, 置信度 {}", task.getFileName(), task.getProcessTimeMs(), task.getConfidence());
+            log.info("识别完成 taskId={}, 耗时={}ms, 置信度={}", taskId, task.getProcessTimeMs(), task.getConfidence());
 
         } catch (Exception e) {
-            log.error("处理文件 [{}] 异常", task.getFileName(), e);
+            log.error("处理异常 taskId={}", taskId, e);
             task.setStatus(TaskStatus.FAILED);
-            task.setErrorMessage("处理失败: " + e.getMessage());
+            task.setErrorMessage("处理失败，请重试");
             task.setProcessTimeMs(System.currentTimeMillis() - startTime);
         }
     }
 
     public RecognizeTaskVO getTask(String taskId) {
+        if (!isValidTaskId(taskId)) return null;
         return taskStore.get(taskId);
     }
 
@@ -114,22 +135,24 @@ public class RecognitionService {
     }
 
     public RecognizeTaskVO confirmCorrection(CorrectionRequest request) {
+        if (!isValidTaskId(request.getTaskId())) {
+            throw new IllegalArgumentException("无效的任务ID");
+        }
         RecognizeTaskVO task = taskStore.get(request.getTaskId());
         if (task == null) {
-            throw new IllegalArgumentException("任务不存在: " + request.getTaskId());
+            throw new IllegalArgumentException("任务不存在");
         }
 
         if (request.getFields() != null) {
             List<RecognizeTaskVO.FieldVO> newFields = new ArrayList<>();
             for (Map<String, Object> fieldMap : request.getFields()) {
                 RecognizeTaskVO.FieldVO fv = new RecognizeTaskVO.FieldVO();
-                fv.setStandardKey(str(fieldMap.get("standardKey")));
-                fv.setDisplayName(str(fieldMap.get("displayName")));
-                fv.setOriginalKey(str(fieldMap.get("originalKey")));
-                fv.setValue(fieldMap.get("value"));
-                fv.setValueType(str(fieldMap.get("valueType")));
-                fv.setConfidence(fieldMap.containsKey("confidence")
-                        ? ((Number) fieldMap.get("confidence")).doubleValue() : 1.0);
+                fv.setStandardKey(sanitizeStr(fieldMap.get("standardKey"), 64));
+                fv.setDisplayName(sanitizeStr(fieldMap.get("displayName"), 128));
+                fv.setOriginalKey(sanitizeStr(fieldMap.get("originalKey"), 128));
+                fv.setValue(sanitizeStr(fieldMap.get("value"), MAX_FIELD_VALUE_LENGTH));
+                fv.setValueType(sanitizeStr(fieldMap.get("valueType"), 16));
+                fv.setConfidence(safeDouble(fieldMap.get("confidence"), 1.0));
 
                 learnFieldMapping(fv);
                 newFields.add(fv);
@@ -144,13 +167,13 @@ public class RecognitionService {
                 for (var entry : rowMap.entrySet()) {
                     if (entry.getValue() instanceof Map<?, ?> cellMap) {
                         RecognizeTaskVO.FieldVO fv = new RecognizeTaskVO.FieldVO();
-                        fv.setStandardKey(str(cellMap.get("standardKey")));
-                        fv.setDisplayName(str(cellMap.get("displayName")));
-                        fv.setOriginalKey(str(cellMap.get("originalKey")));
-                        fv.setValue(cellMap.get("value"));
-                        fv.setValueType(str(cellMap.get("valueType")));
+                        fv.setStandardKey(sanitizeStr(cellMap.get("standardKey"), 64));
+                        fv.setDisplayName(sanitizeStr(cellMap.get("displayName"), 128));
+                        fv.setOriginalKey(sanitizeStr(cellMap.get("originalKey"), 128));
+                        fv.setValue(sanitizeStr(cellMap.get("value"), MAX_FIELD_VALUE_LENGTH));
+                        fv.setValueType(sanitizeStr(cellMap.get("valueType"), 16));
                         fv.setConfidence(1.0);
-                        row.put(entry.getKey(), fv);
+                        row.put(sanitizeStr(entry.getKey(), 64), fv);
                     }
                 }
                 newTable.add(row);
@@ -168,7 +191,39 @@ public class RecognitionService {
         }
     }
 
-    private String str(Object obj) {
-        return obj == null ? null : obj.toString();
+    private String generateTaskId() {
+        byte[] bytes = new byte[16];
+        SECURE_RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    private boolean isValidTaskId(String taskId) {
+        return taskId != null && taskId.matches("^[a-f0-9]{32}$");
+    }
+
+    private void evictOldTasks() {
+        while (taskStore.size() >= MAX_TASK_STORE_SIZE && !taskOrder.isEmpty()) {
+            String oldest = taskOrder.pollFirst();
+            if (oldest != null) {
+                taskStore.remove(oldest);
+            }
+        }
+    }
+
+    private String sanitizeFileName(String name) {
+        if (name == null) return "unknown";
+        return name.replaceAll("[\\r\\n\\t]", "_").replaceAll("[^\\p{L}\\p{N}._ \\-]", "_");
+    }
+
+    private String sanitizeStr(Object obj, int maxLen) {
+        if (obj == null) return null;
+        String s = obj.toString();
+        if (s.length() > maxLen) s = s.substring(0, maxLen);
+        return s;
+    }
+
+    private double safeDouble(Object obj, double defaultVal) {
+        if (obj instanceof Number n) return n.doubleValue();
+        return defaultVal;
     }
 }

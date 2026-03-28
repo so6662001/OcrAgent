@@ -49,7 +49,8 @@ async function handleConfirm() {
       confirmedJson.value = buildOutputJson()
       emit('confirmed', confirmedJson.value)
     }
-  } catch {
+  } catch (err) {
+    console.warn('提交纠错请求失败，使用本地数据', err)
     confirmed.value = true
     confirmedJson.value = buildOutputJson()
     emit('confirmed', confirmedJson.value)
@@ -94,8 +95,30 @@ function buildOutputJson() {
   return result
 }
 
+const copySuccess = ref(false)
+
 function copyJson() {
-  navigator.clipboard.writeText(JSON.stringify(confirmedJson.value, null, 2))
+  const text = JSON.stringify(confirmedJson.value, null, 2)
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => showCopyTip())
+  } else {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    try {
+      document.execCommand('copy')
+      showCopyTip()
+    } catch { /* ignore */ }
+    document.body.removeChild(textarea)
+  }
+}
+
+function showCopyTip() {
+  copySuccess.value = true
+  setTimeout(() => { copySuccess.value = false }, 1500)
 }
 </script>
 
@@ -164,7 +187,7 @@ function copyJson() {
     <div v-else class="section">
       <div class="json-header">
         <h3 class="section-title">结构化JSON结果</h3>
-        <button class="btn-copy" @click="copyJson">复制</button>
+        <button class="btn-copy" @click="copyJson">{{ copySuccess ? '已复制' : '复制' }}</button>
       </div>
       <pre class="json-output">{{ JSON.stringify(confirmedJson, null, 2) }}</pre>
     </div>

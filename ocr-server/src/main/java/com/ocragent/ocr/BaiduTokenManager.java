@@ -35,14 +35,19 @@ public class BaiduTokenManager {
     }
 
     private String refreshToken() {
-        String url = String.format(
-                "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=%s&client_secret=%s",
-                config.getApiKey(), config.getSecretKey()
-        );
+        String apiKey = config.getApiKey();
+        String secretKey = config.getSecretKey();
+        if (apiKey == null || apiKey.isBlank() || secretKey == null || secretKey.isBlank()) {
+            throw new RuntimeException("百度OCR API Key/Secret Key未配置，请设置环境变量 BAIDU_OCR_API_KEY 和 BAIDU_OCR_SECRET_KEY");
+        }
+
+        String url = "https://aip.baidubce.com/oauth/2.0/token";
+        String body = "grant_type=client_credentials&client_id=" + apiKey + "&client_secret=" + secretKey;
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .header("Content-Type", "application/x-www-form-urlencoded")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
                     .timeout(Duration.ofSeconds(15))
                     .build();
 
@@ -56,14 +61,14 @@ public class BaiduTokenManager {
                 log.info("百度OCR Token刷新成功, 有效期{}秒", expiresIn);
                 return cachedToken;
             } else {
-                String error = json.has("error_description")
-                        ? json.get("error_description").getAsString()
-                        : response.body();
-                throw new RuntimeException("获取Token失败: " + error);
+                log.error("获取Token失败, HTTP状态={}", response.statusCode());
+                throw new RuntimeException("获取百度OCR Token失败，请检查API Key配置");
             }
+        } catch (RuntimeException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("获取百度OCR Token异常", e);
-            throw new RuntimeException("获取百度OCR Token失败", e);
+            log.error("获取百度OCR Token网络异常", e);
+            throw new RuntimeException("获取百度OCR Token失败（网络异常）", e);
         }
     }
 }

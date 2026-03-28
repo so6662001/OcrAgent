@@ -21,13 +21,21 @@ function handleSelect(e: Event) {
   input.value = ''
 }
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+const MAX_FILES = 20
+
 function filterFiles(files: File[]) {
   const allowed = ['image/jpeg', 'image/png', 'image/bmp', 'image/tiff', 'application/pdf']
-  return files.filter(f => {
+  const filtered = files.filter(f => {
+    if (f.size > MAX_FILE_SIZE) return false
     if (allowed.includes(f.type)) return true
     const ext = f.name.toLowerCase().split('.').pop()
     return ['jpg', 'jpeg', 'png', 'bmp', 'tiff', 'pdf'].includes(ext || '')
   })
+  if (filtered.length > MAX_FILES) {
+    return filtered.slice(0, MAX_FILES)
+  }
+  return filtered
 }
 
 function openPicker() {
