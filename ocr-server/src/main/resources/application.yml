@@ -1,0 +1,18 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 100MB
+
+baidu:
+  ocr:
+    api-key: ${BAIDU_OCR_API_KEY:your-api-key}
+    secret-key: ${BAIDU_OCR_SECRET_KEY:your-secret-key}
+
+file:
+  upload-dir: ./uploads
